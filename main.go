@@ -93,6 +93,7 @@ func main() {
 		v1 := router.Group("/v1")
 		routes.EmailRoute(v1)
 		routes.ReadWriteFileRoute(v1)
+		routes.HttpClientRoute(v1)
 	}
 
 	// 4. Add your protected routes here
