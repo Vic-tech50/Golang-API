@@ -17,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/joho/godotenv"
 )
 
 type Product struct {
@@ -32,6 +33,11 @@ type Product struct {
 var db *sql.DB
 
 func main() {
+
+	// Load variables from the .env file.
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found; using environment variables already set")
+	}
 
 	// http.HandleFunc("/go", func(w http.ResponseWriter, r *http.Request) {
 	// 	fmt.Fprintf(w, "Hello, you've requested: %s\n", r.URL.Path)
@@ -87,6 +93,7 @@ func main() {
 	// routes.EmailRoute(router)     //import route on different folder with main.go
 	routes.CrudRoutes(router, db) //import route on different folder with main.go
 	routes.RegisterAuthRoutes(router, db)
+	routes.GetConfigRoute(router)
 
 	//Api Versioning
 	{
@@ -94,6 +101,8 @@ func main() {
 		routes.EmailRoute(v1)
 		routes.ReadWriteFileRoute(v1)
 		routes.HttpClientRoute(v1)
+		routes.CacheRoute(v1)
+
 	}
 
 	// 4. Add your protected routes here
