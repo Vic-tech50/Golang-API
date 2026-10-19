@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
+	"time" // Provides the rate-limit duration.
 
+	"go-crud/middleware" // Imports the login rate limiter.
+	// Imports the login rate limiter.
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -54,6 +56,68 @@ func Logout(c *gin.Context) {
 func RegisterAuthRoutes(router *gin.Engine, db *sql.DB) {
 	//login api
 	router.POST("/login", func(c *gin.Context) {
+		var input LoginInput //variable input
+
+		//should accept json data
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "Provide a valid email and password.",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		// user variable
+		var user AuthUser
+
+		// get data from database
+		err := db.QueryRow(
+			"SELECT id, name, email, password FROM users WHERE email = ?",
+			strings.TrimSpace(input.Email),
+		).Scan(&user.ID, &user.Name, &user.Email, &user.Password)
+
+		if err != nil {
+			// Don't reveal whether the email exists.
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "Invalid email or password.",
+			})
+			return
+		}
+
+		// Compare the the unhashed password
+		if err := bcrypt.CompareHashAndPassword(
+			[]byte(user.Password),
+			[]byte(input.Password),
+		); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"error": "Invalid email or password.",
+			})
+			return
+		}
+
+		token, err := GenerateToken(user.ID) //token address
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Could not generate access token.",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":      "Login successful.",
+			"access_token": token,
+			"token_type":   "Bearer",
+			"expires_in":   900,
+			"user": gin.H{
+				"id":    user.ID,
+				"name":  user.Name,
+				"email": user.Email,
+			},
+		})
+	})
+
+	//Login with rate limit
+	router.POST("/loginratelimit", middleware.LoginRateLimit(5, time.Minute), func(c *gin.Context) {
 		var input LoginInput //variable input
 
 		//should accept json data

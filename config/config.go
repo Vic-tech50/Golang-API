@@ -7,6 +7,7 @@ type AppConfig struct {
 	Environment  string // The environment where the app is running.
 	APIBaseURL   string // The base URL of an external API.
 	CacheSeconds int    // How long cached data should remain valid.
+	Author       string
 }
 
 // App stores the default configuration values for the application.
@@ -17,4 +18,5 @@ var App = AppConfig{
 	Environment:  "development",
 	APIBaseURL:   "https://jsonplaceholder.typicode.com",
 	CacheSeconds: 30,
+	Author:       "Okenyi Victor",
 }
