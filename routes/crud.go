@@ -24,20 +24,10 @@ func HashPassword(password string) (string, error) {
 }
 
 func CrudRoutes(router *gin.Engine, db *sql.DB) {
-	// Display the insertion form.
-	// router.GET("/users/create", func(c *gin.Context) {
-	// 	c.HTML(http.StatusOK, "insert.html", nil)
-	// })
 
 	// Insert submitted form data into MySQL.
 	router.POST("/users/insert", func(c *gin.Context) {
-
-		//
-		// var user struct {
-		// 	Name  string `json:"name"`
-		// 	Email string `json:"email"`
-		// }
-		var user User
+	var user User
 
 		// Read JSON from Postman
 		if err := c.ShouldBindJSON(&user); err != nil {
@@ -46,7 +36,6 @@ func CrudRoutes(router *gin.Engine, db *sql.DB) {
 			})
 			return
 		}
-
 		name := strings.TrimSpace(user.Name)        //get name from form
 		email := strings.TrimSpace(user.Email)      //get email data
 		password := user.Password                   //Don't trim passwords; spaces may be intentional

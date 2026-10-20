@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"go-crud/config"
 	"go-crud/routes"
 
 	// "fmt"
@@ -187,6 +188,13 @@ func createProduct(c *gin.Context) {
 	}
 
 	product.Name = strings.TrimSpace(product.Name)
+	encryptData, err := config.Encrypt(product.Description)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Encryption failed.",
+		})
+		return
+	}
 	if product.Name == "" || len(product.Name) > 150 {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Name must contain 1 to 150 characters",
@@ -197,7 +205,7 @@ func createProduct(c *gin.Context) {
 	result, err := db.Exec(`
 		INSERT INTO products (name, description, price, stock)
 		VALUES (?, ?, ?, ?)`,
-		product.Name, product.Description,
+		product.Name, encryptData,
 		product.Price, product.Stock,
 	)
 	if err != nil {
@@ -255,6 +263,14 @@ func getProducts(c *gin.Context) {
 			})
 			return
 		}
+		decryptData, err := config.Decrypt(p.Description)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Could not decrypt product description",
+			})
+			return
+		}
+		p.Description = decryptData
 		products = append(products, p)
 	}
 
