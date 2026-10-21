@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go-crud/config"
 	"go-crud/routes"
+	"time"
 
 	// "fmt"
 	"log"
@@ -13,25 +14,60 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	// "golang/routes"
 
+	"github.com/gin-contrib/cors" // Provides CORS middleware for Gin.
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
+	"golang.org/x/time/rate"
 )
 
 type Product struct {
-	ID          uint64  `json:"id"`
-	Name        string  `json:"name" binding:"required"`
-	Description string  `json:"description"`
-	Price       float64 `json:"price" binding:"required,gt=0"`
-	Stock       int     `json:"stock" binding:"gte=0"`
-	CreatedAt   string  `json:"created_at,omitempty"`
-	UpdatedAt   string  `json:"updated_at,omitempty"`
+	ID          uint64    `json:"id"`
+	Name        string    `json:"name" binding:"required"`
+	Description string    `json:"description"`
+	Price       float64   `json:"price" binding:"required,gt=0"`
+	Stock       int       `json:"stock" binding:"gte=0"`
+	CreatedAt   time.Time `json:"created_at,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at,omitempty"`
 }
 
 var db *sql.DB
+
+func RateLimiter() gin.HandlerFunc {
+	type client struct {
+		limiter *rate.Limiter
+	}
+
+	var (
+		mu      sync.Mutex
+		clients = make(map[string]*client)
+	)
+
+	return func(c *gin.Context) {
+		ip := c.ClientIP()
+
+		mu.Lock()
+		if _, exists := clients[ip]; !exists {
+			// Allow 10 requests per second with a burst of 20
+			clients[ip] = &client{limiter: rate.NewLimiter(2, 20)}
+		}
+		cl := clients[ip]
+		mu.Unlock()
+
+		if !cl.limiter.Allow() {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": "rate limit exceeded",
+			})
+			return
+		}
+
+		c.Next()
+	}
+}
 
 func main() {
 
@@ -88,6 +124,37 @@ func main() {
 	}
 
 	router := gin.Default()
+	router.Use(RateLimiter()) //import middleware globally
+
+	// Configure which frontend origins can access your API.
+	router.Use(cors.New(cors.Config{
+		// Allow requests from your React development server.
+		AllowOrigins: []string{
+			"http://localhost:5173",
+			"http://localhost:3000",
+		},
+
+		// Allow the HTTP methods your API uses.
+		AllowMethods: []string{
+			"GET",
+			"POST",
+			"PUT",
+			"PATCH",
+			"DELETE",
+			"OPTIONS",
+		},
+
+		// Allow common headers sent by frontend applications.
+		AllowHeaders: []string{
+			"Origin",
+			"Content-Type",
+			"Authorization",
+		},
+
+		// Allow cookies and credentialed requests if needed.
+		// Set this to false if you do not use browser cookies.
+		AllowCredentials: true,
+	}))
 
 	routes.RegisterMe(router) //import route on different folder with main.go
 	routes.AdminRoute(router) //import route on different folder with main.go
@@ -271,6 +338,7 @@ func getProducts(c *gin.Context) {
 			return
 		}
 		p.Description = decryptData
+
 		products = append(products, p)
 	}
 

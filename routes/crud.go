@@ -2,6 +2,7 @@ package routes
 
 import (
 	"database/sql"
+	"go-crud/helpers"
 	"log"
 	"net/http"
 	"strings"
@@ -27,7 +28,7 @@ func CrudRoutes(router *gin.Engine, db *sql.DB) {
 
 	// Insert submitted form data into MySQL.
 	router.POST("/users/insert", func(c *gin.Context) {
-	var user User
+		var user User
 
 		// Read JSON from Postman
 		if err := c.ShouldBindJSON(&user); err != nil {
@@ -142,9 +143,8 @@ func CrudRoutes(router *gin.Engine, db *sql.DB) {
 
 			users = append(users, gin.H{
 				"id":         id,
-				"name":       name,
+				"name":       helpers.Capitalize(name),
 				"email":      email,
-				"password":   password,
 				"created_at": createdAt,
 			})
 		}
