@@ -40,6 +40,45 @@ type User struct {
 	// Price stores the product price.
 	Password string `gorm:"not null" json:"password"`
 
+	Role string `gorm:"size:20;not null;default:user" json:"role"`
+
 	// GORM automatically manages these timestamps.
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type Payment struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Email     string    `gorm:"size:150;not null" json:"email"`
+	Reference string    `gorm:"size:100;uniqueIndex;not null" json:"reference"`
+	Amount    int64     `gorm:"not null" json:"amount"`
+	Currency  string    `gorm:"size:3;not null;default:NGN" json:"currency"`
+	Status    string    `gorm:"size:20;not null;default:pending" json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// FlutterwavePayment represents a payment stored in MySQL.
+type FlutterwavePayment struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	Email         string    `gorm:"size:150;not null" json:"email"`
+	Reference     string    `gorm:"size:100;uniqueIndex;not null" json:"reference"`
+	TransactionID string    `gorm:"size:100" json:"transaction_id"`
+	Amount        float64   `gorm:"not null" json:"amount"`
+	Currency      string    `gorm:"size:3;not null;default:NGN" json:"currency"`
+	Status        string    `gorm:"size:20;not null;default:pending" json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// StripePayment stores the payment details in MySQL.
+type StripePayment struct {
+	ID                uint      `gorm:"primaryKey" json:"id"`
+	Email             string    `gorm:"size:150;not null" json:"email"`
+	Reference         string    `gorm:"size:100;uniqueIndex;not null" json:"reference"`
+	CheckoutSessionID string    `gorm:"size:150;uniqueIndex" json:"checkout_session_id"`
+	Amount            int64     `gorm:"not null" json:"amount"`
+	Currency          string    `gorm:"size:3;not null;default:usd" json:"currency"`
+	Status            string    `gorm:"size:20;not null;default:pending" json:"status"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }

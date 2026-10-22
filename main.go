@@ -107,9 +107,20 @@ func main() {
 	}
 
 	// Create or update the products table.
-	if err := config.DB.AutoMigrate(&models.Product{}); err != nil {
+	if err := config.DB.AutoMigrate(&models.StripePayment{}); err != nil {
 		log.Fatal("Database migration failed: ", err)
 	}
+
+	// 	// Connect to MySQL first.
+	// config.ConnectDatabase()
+
+	// // Create the payments table if it does not exist.
+	// err := config.DB.AutoMigrate(&models.Payment{})
+	// if err != nil {
+	// 	log.Fatal("Failed to create payments table:", err)
+	// }
+
+	// log.Println("Payments table created successfully")
 
 	router := gin.Default()
 	router.Use(RateLimiter()) //import middleware globally
@@ -157,6 +168,9 @@ func main() {
 	routes.RegisterAuthRoutes(router, db)
 	routes.GetConfigRoute(router)
 	routes.SMSRoutes(router)
+	routes.RegisterPaymentRoutes(router)
+	routes.RegisterFlutterwaveRoutes(router)
+	routes.RegisterStripeRoutes(router)
 
 	//Api Versioning
 	{

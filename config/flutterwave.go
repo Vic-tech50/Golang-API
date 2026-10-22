@@ -1,0 +1,306 @@
+
+package config
+
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	// "go-crud/config"
+	"go-crud/models"
+
+	"github.com/gin-gonic/gin"
+)
+
+// flutterwaveRequest sends an authenticated request to Flutterwave.
+func flutterwaveRequest(method, endpoint string, body any) ([]byte, error) {
+	// Read the secret key from the environment.
+	secretKey := os.Getenv("FLW_SECRET_KEY")
+	if secretKey == "" {
+		return nil, fmt.Errorf("FLW_SECRET_KEY is not configured")
+	}
+
+	// Convert the request body to JSON when one is provided.
+	var requestBody io.Reader
+	if body != nil {
+		jsonBody, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		requestBody = bytes.NewBuffer(jsonBody)
+	}
+
+	// Create the HTTP request.
+	req, err := http.NewRequest(
+		method,
+		"https://api.flutterwave.com/v3"+endpoint,
+		requestBody,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// Add authentication and JSON headers.
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	// Use a timeout so the request cannot hang indefinitely.
+	client := &http.Client{Timeout: 20 * time.Second}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Read a limited amount of the response.
+	responseData, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+
+	// Return a useful error for unsuccessful HTTP responses.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf(
+			"Flutterwave returned HTTP %d: %s",
+			resp.StatusCode,
+			string(responseData),
+		)
+	}
+
+	return responseData, nil
+}
+
+// InitializeFlutterwavePayment starts a payment and returns its checkout link.
+func InitializeFlutterwavePayment(c *gin.Context) {
+	// Define the JSON fields accepted from Postman.
+	var input struct {
+		Email string  `json:"email" binding:"required,email"`
+		Name  string  `json:"name" binding:"required"`
+		Amount float64 `json:"amount" binding:"required,gt=0"`
+	}
+
+	// Decode and validate the incoming JSON.
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Provide a valid email, name, and positive amount.",
+		})
+		return
+	}
+
+	// Generate a unique transaction reference.
+	randomBytes := make([]byte, 16)
+	if _, err := rand.Read(randomBytes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Could not generate payment reference.",
+		})
+		return
+	}
+
+	reference := "VIC-FLW-" + hex.EncodeToString(randomBytes)
+
+	// Save the payment as pending before contacting Flutterwave.
+	payment := models.FlutterwavePayment{
+		Email:     input.Email,
+		Reference: reference,
+		Amount:    input.Amount,
+		Currency:  "NGN",
+		Status:    "pending",
+	}
+
+	if err := DB.Create(&payment).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Could not save payment.",
+		})
+		return
+	}
+
+	// Read the URL Flutterwave should redirect the customer to.
+	redirectURL := os.Getenv("FLW_REDIRECT_URL")
+	if redirectURL == "" {
+		redirectURL = "http://localhost:3000/payment/callback"
+	}
+
+	// Build the request Flutterwave expects.
+	payload := map[string]any{
+		"tx_ref":       reference,
+		"amount":       input.Amount,
+		"currency":     "NGN",
+		"redirect_url": redirectURL,
+		"customer": map[string]string{
+			"email": input.Email,
+			"name":  input.Name,
+		},
+		"customizations": map[string]string{
+			"title": "Payment",
+		},
+	}
+
+	// Ask Flutterwave to create the hosted payment page.
+	responseData, err := flutterwaveRequest(
+		http.MethodPost,
+		"/payments",
+		payload,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": "Could not initialize Flutterwave payment.",
+		})
+		return
+	}
+
+	// Decode Flutterwave's response.
+	var response struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+		Data    struct {
+			Link string `json:"link"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(responseData, &response); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": "Invalid response from Flutterwave.",
+		})
+		return
+	}
+
+	// Confirm Flutterwave actually returned a checkout link.
+	if response.Status != "success" || response.Data.Link == "" {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": "Flutterwave did not return a payment link.",
+		})
+		return
+	}
+
+	// Return the reference and checkout URL to the caller.
+	c.JSON(http.StatusOK, gin.H{
+		"message":        "Payment initialized successfully.",
+		"reference":      reference,
+		"authorization_url": response.Data.Link,
+		"amount":         input.Amount,
+		"currency":       "NGN",
+		"status":         "pending",
+	})
+}
+
+// VerifyFlutterwavePayment verifies a transaction using Flutterwave's API.
+func VerifyFlutterwavePayment(c *gin.Context) {
+	// Get the reference generated by our own API.
+	reference := strings.TrimSpace(c.Query("tx_ref"))
+
+	// Get the transaction ID returned by Flutterwave after checkout.
+	transactionID := strings.TrimSpace(c.Query("transaction_id"))
+
+	// Both values are required for this verification flow.
+	if reference == "" || transactionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "tx_ref and transaction_id are required.",
+		})
+		return
+	}
+
+	// Require a numeric Flutterwave transaction ID.
+	if _, err := strconv.ParseInt(transactionID, 10, 64); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "transaction_id must be numeric.",
+		})
+		return
+	}
+
+	// Find the original payment record in our database.
+	var payment models.FlutterwavePayment
+	if err := DB.
+		Where("reference = ?", reference).
+		First(&payment).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Payment reference was not found.",
+		})
+		return
+	}
+
+	// Do not verify an already completed payment again.
+	if payment.Status == "successful" {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Payment has already been verified.",
+			"payment": payment,
+		})
+		return
+	}
+
+	// Fetch the transaction details directly from Flutterwave.
+	responseData, err := flutterwaveRequest(
+		http.MethodGet,
+		"/transactions/"+transactionID+"/verify",
+		nil,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": "Could not verify transaction with Flutterwave.",
+		})
+		return
+	}
+
+	// Decode the transaction details returned by Flutterwave.
+	var response struct {
+		Status string `json:"status"`
+		Data struct {
+			ID       int64   `json:"id"`
+			TxRef    string  `json:"tx_ref"`
+			Amount   float64 `json:"amount"`
+			Currency string  `json:"currency"`
+			Status   string  `json:"status"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(responseData, &response); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": "Invalid verification response.",
+		})
+		return
+	}
+
+	// Ensure the payment belongs to this reference and has the expected
+	// amount, currency, and successful transaction status.
+	if response.Status != "success" ||
+		response.Data.Status != "successful" ||
+		response.Data.TxRef != payment.Reference ||
+		response.Data.Currency != payment.Currency ||
+		math.Abs(response.Data.Amount-payment.Amount) > 0.001 ||
+		strconv.FormatInt(response.Data.ID, 10) != transactionID {
+
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message": "Payment could not be verified as successful.",
+		})
+		return
+	}
+
+	// Update the record only after all verification checks pass.
+	if err := DB.Model(&payment).Updates(map[string]any{
+		"status":         "successful",
+		"transaction_id": transactionID,
+	}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Payment was verified, but the database update failed.",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Payment verified successfully.",
+		"reference": payment.Reference,
+		"amount":    payment.Amount,
+		"currency":  payment.Currency,
+		"status":    "successful",
+	})
+}
