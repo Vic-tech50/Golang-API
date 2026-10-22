@@ -2,13 +2,17 @@ package routes
 
 import (
 	"database/sql"
-	"go-crud/helpers"
+	// "go-crud/helpers"
+	"errors"
+	"go-crud/config"
+	"go-crud/models"
 	"log"
 	"net/http"
 	"strings"
-
+	"strconv"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 type User struct {
@@ -110,48 +114,10 @@ func CrudRoutes(router *gin.Engine, db *sql.DB) {
 	// READ ALL: GET /users
 	router.GET("/users", func(c *gin.Context) {
 		// Read all users from the database
-		rows, err := db.Query(
-			"SELECT id, name, email, password, created_at FROM users ORDER BY id DESC",
-		)
-
-		if err != nil {
+		var users []models.User
+		if err := config.DB.Order("id DESC").Find(&users).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Failed to read users from database",
-			})
-			return
-		}
-		defer rows.Close()
-
-		// Create a slice to store users
-		users := []gin.H{}
-
-		for rows.Next() {
-			var id int
-			var name string
-			var email string
-			var password string
-			var createdAt string
-
-			//
-			err := rows.Scan(&id, &name, &email, &password, &createdAt)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": "Failed to read user data",
-				})
-				return
-			}
-
-			users = append(users, gin.H{
-				"id":         id,
-				"name":       helpers.Capitalize(name),
-				"email":      email,
-				"created_at": createdAt,
-			})
-		}
-
-		if err := rows.Err(); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Error while reading users",
+				"error": "could not retrieve products",
 			})
 			return
 		}
@@ -163,47 +129,92 @@ func CrudRoutes(router *gin.Engine, db *sql.DB) {
 		})
 	})
 
-	//get a single user
 	router.GET("/users/:id", func(c *gin.Context) {
-		// Get the user ID from the URL
-		id := c.Param("id")
+    // Get the user ID from the URL.
+    id := c.Param("id")
 
-		// Find the user in the database
-		// var user struct {
-		// 	ID        int    `json:"id"`
-		// 	Name      string `json:"name"`
-		// 	Email     string `json:"email"`
-		// 	CreatedAt string `json:"created_at"`
-		// }
-		var user User
+    // Check that the ID is a valid number.
+    userID, err := strconv.Atoi(id)
+    if err != nil || userID <= 0 {
+        c.JSON(http.StatusBadRequest, gin.H{
+            "error": "Invalid user ID",
+        })
+        return
+    }
 
-		err := db.QueryRow("SELECT id, name, email, created_at FROM users WHERE id = ?", id).Scan(
-			&user.ID,
-			&user.Name,
-			&user.Email,
-			&user.CreatedAt,
-		)
+    // Create a variable to hold the user record.
+    var user models.User
 
-		if err != nil {
-			if err == sql.ErrNoRows {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error": "User not found",
-				})
-				return
-			}
+    // Find the user by ID in the database.
+    if err := config.DB.First(&user, userID).Error; err != nil {
+        // Check whether the user exists.
+        if errors.Is(err, gorm.ErrRecordNotFound) {
+            c.JSON(http.StatusNotFound, gin.H{
+                "error": "User not found",
+            })
+            return
+        }
 
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Failed to retrieve user",
-			})
-			return
-		}
+        // Handle other database errors.
+        c.JSON(http.StatusInternalServerError, gin.H{
+            "error": "Could not retrieve user",
+        })
+        return
+    }
 
-		// Return the user as JSON
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"user":    user,
-		})
-	})
+    // Return the user details.
+    c.JSON(http.StatusOK, gin.H{
+        "message": "User retrieved successfully",
+        "data":    user,
+    })
+})
+
+	//get a single user
+	// router.GET("/users/:id", func(c *gin.Context) {
+	// 	// Get the user ID from the URL
+	// 	// id := c.Param("id")
+	// 	var user models.User
+
+	// 	// Find the user by ID.
+	// 	if err := config.DB.First(&user, c.Param("id")).Error; err != nil {
+	// 		if errors.Is(err, gorm.ErrRecordNotFound) {
+	// 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+	// 			return
+	// 		}
+
+	// 		c.JSON(http.StatusInternalServerError, gin.H{
+	// 			"error": "could not retrieve product",
+	// 		})
+	// 		return
+	// 	}
+
+	// 	// err := db.QueryRow("SELECT id, name, email, created_at FROM users WHERE id = ?", id).Scan(
+	// 	// 	&user.ID,
+	// 	// 	&user.Name,
+	// 	// 	&user.Email,
+	// 	// 	&user.CreatedAt,
+	// 	// )
+
+	// 	// if err != nil {
+	// 	// 	if err == sql.ErrNoRows {
+	// 	// 		c.JSON(http.StatusNotFound, gin.H{
+	// 	// 			"error": "User not found",
+	// 	// 		})
+	// 	// 		return
+	// 	// 	}
+
+	// 	// 	c.JSON(http.StatusInternalServerError, gin.H{
+	// 	// 		"error": "Failed to retrieve user",
+	// 	// 	})
+	// 	// 	return
+	// 	// }
+
+	// 	// Return the user as JSON
+	// 	c.JSON(http.StatusOK, gin.H{
+	// 		"success": true,
+	// 		"user":    user,
+	// 	})
+	// })
 
 	/*  Update Logic   */
 	router.PUT("/users/:id", func(c *gin.Context) {

@@ -1,0 +1,9 @@
+basePath: /
+host: localhost:8080
+info:
+  contact: {}
+  description: API documentation for my Go CRUD application.
+  title: Go CRUD API
+  version: "1.0"
+paths: {}
+swagger: "2.0"

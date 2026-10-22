@@ -1,3 +1,9 @@
+// @title Go CRUD API
+// @version 1.0
+// @description API documentation for my Go CRUD application.
+// @host localhost:8080
+// @BasePath /
+
 package main
 
 import (
@@ -16,6 +22,8 @@ import (
 	"strings"
 	"sync"
 
+	"go-crud/models"
+
 	// "golang/routes"
 
 	"github.com/gin-contrib/cors" // Provides CORS middleware for Gin.
@@ -23,6 +31,11 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 	"golang.org/x/time/rate"
+
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+
+	_ "go-crud/docs"
 )
 
 type Product struct {
@@ -76,55 +89,36 @@ func main() {
 		log.Println("No .env file found; using environment variables already set")
 	}
 
-	// http.HandleFunc("/go", func(w http.ResponseWriter, r *http.Request) {
-	// 	fmt.Fprintf(w, "Hello, you've requested: %s\n", r.URL.Path)
-	// })
-
-	// http.ListenAndServe(":8080", nil)
-	// Configure using environment variables.
-	//
-	user := os.Getenv("DB_USER")
-	password := os.Getenv("DB_PASSWORD")
-	host := os.Getenv("DB_HOST")
-	port := os.Getenv("DB_PORT")
-
-	if user == "" || host == "" || port == "" {
-		log.Fatal("Set DB_USER, DB_HOST and DB_PORT")
+	// Connect to MySQL through GORM.
+	if err := config.Connect(); err != nil {
+		log.Fatal(err)
 	}
 
-	dsn := user + ":" + password + "@tcp(" +
-		host + ":" + port + ")/go_crud?parseTime=true"
-
-	var err error
-	db, err = sql.Open("mysql", dsn)
+	// Close the database connection when the application exits.
+	sqlDB, err := config.DB.DB()
 	if err != nil {
-		log.Fatal("Database configuration failed:", err)
+		log.Fatal(err)
 	}
-	defer db.Close()
+	defer sqlDB.Close()
 
-	if err = db.Ping(); err != nil {
-		log.Fatal("Cannot connect to MySQL:", err)
+	// Create the directory for uploaded files.
+	if err := os.MkdirAll("uploads", 0755); err != nil {
+		log.Fatal("Could not create uploads directory: ", err)
 	}
 
-	// Create the table if it does not exist.
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS products (
-			id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-			name VARCHAR(150) NOT NULL,
-			description TEXT NOT NULL,
-			price DECIMAL(12,2) NOT NULL,
-			stock INT NOT NULL DEFAULT 0,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-				ON UPDATE CURRENT_TIMESTAMP
-		)
-	`)
-	if err != nil {
-		log.Fatal("Table initialization failed:", err)
+	// Create or update the products table.
+	if err := config.DB.AutoMigrate(&models.Product{}); err != nil {
+		log.Fatal("Database migration failed: ", err)
 	}
 
 	router := gin.Default()
 	router.Use(RateLimiter()) //import middleware globally
+
+	// Limit in-memory multipart form processing to 8 MB.
+	router.MaxMultipartMemory = 8 << 20
+
+	// Serve uploaded files through URLs such as /uploads/image.png.
+	router.Static("/uploads", "./uploads")
 
 	// Configure which frontend origins can access your API.
 	router.Use(cors.New(cors.Config{
@@ -162,6 +156,7 @@ func main() {
 	routes.CrudRoutes(router, db) //import route on different folder with main.go
 	routes.RegisterAuthRoutes(router, db)
 	routes.GetConfigRoute(router)
+	routes.SMSRoutes(router)
 
 	//Api Versioning
 	{
@@ -170,6 +165,7 @@ func main() {
 		routes.ReadWriteFileRoute(v1)
 		routes.HttpClientRoute(v1)
 		routes.CacheRoute(v1)
+		routes.CrudFileRoutes(v1)
 
 	}
 
@@ -197,29 +193,14 @@ func main() {
 			"Action":  "Message for the world",
 		})
 	})
-	// RegisterMe(router) //import route in the same folder with main.go
 
-	// router.LoadHTMLGlob("templates/*.html")
-
-	// // router.GET("/show", func(c *gin.Context) {
-	// // 	c.HTML(200, "show.html", nil)
-	// // 	// c.String(200, "Hello World")
-	// // })
-
-	// // router.GET("/view", viewRes)
-
-	// // router.GET("/ping", func(c *gin.Context) {
-	// // 	// Return JSON response
-	// // 	c.JSON(http.StatusOK, gin.H{
-	// // 		"message": "pong",
-	// // 	})
-	// // })
 	router.GET("/products", getProducts)
 	router.GET("/products/:id", getProduct)
 	router.POST("/products", createProduct)
 	router.PUT("/products/:id", updateProduct)
 	router.DELETE("/products/:id", deleteProduct)
 
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	log.Println("Server running at http://localhost:8080")
 	log.Fatal(router.Run(":8080"))
 }

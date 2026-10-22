@@ -55,6 +55,18 @@ func Logout(c *gin.Context) {
 
 func RegisterAuthRoutes(router *gin.Engine, db *sql.DB) {
 	//login api
+	// Login authenticates a user.
+	// @Summary User login
+	// @Description Authenticate a user using their login credentials.
+	// @Tags Authentication
+	// @Accept json
+	// @Produce json
+	// @Param input body LoginInput true "Login credentials"
+	// @Success 200 {object} map[string]interface{} "Login successful"
+	// @Failure 400 {object} map[string]string "Invalid input"
+	// @Failure 401 {object} map[string]string "Invalid credentials"
+	// @Failure 500 {object} map[string]string "Internal server error"
+	// @Router /login [post]
 	router.POST("/login", func(c *gin.Context) {
 		var input LoginInput //variable input
 
